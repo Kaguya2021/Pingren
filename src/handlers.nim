@@ -1,4 +1,4 @@
-import json, strutils, options, db_connector/db_sqlite, times
+import json, strutils, options, db_connector/db_sqlite, times, httpclient
 import database, utils, ping
 
 type TelegramClient* = object
@@ -45,10 +45,9 @@ proc answerCallbackQuery*(tg: TelegramClient, callbackQueryId: string, text: str
     "callback_query_id": callbackQueryId
   }
   if text.len > 0:
-    payload["text"] = text
+    payload["text"] = %text
   tg.sendRequest("answerCallbackQuery", payload)
 
-# Генераторы клавиатур
 proc buildMainMenuKeyboard*(hasService: bool, isEnabled: bool): JsonNode =
   if not hasService:
     return %*{
@@ -100,7 +99,6 @@ proc buildBackToMenuKeyboard*(): JsonNode =
     ]
   }
 
-# Рендеринг главных экранов
 proc renderMainView*(db: DbConn, tgUserId: int64): (string, JsonNode) =
   let service = db.getServiceByUserId(tgUserId)
   if service.isNone:
@@ -129,15 +127,14 @@ proc renderMainView*(db: DbConn, tgUserId: int64): (string, JsonNode) =
   
   return (text, buildMainMenuKeyboard(true, s.enabled))
 
-# Обработка команд и текстовых сообщений
 proc handleMessage*(tg: TelegramClient, db: DbConn, msg: JsonNode) =
   if not msg.hasKey("from") or not msg.hasKey("chat"): return
   
-  let chatId = msg["chat"]["id"].getBiggestInt()
-  let tgUserId = msg["from"]["id"].getBiggestInt()
-  let username = if msg["from"].hasKey("username"): msg["from"]["username"].getStr() else: ""
-  let firstName = if msg["from"].hasKey("first_name"): msg["from"]["first_name"].getStr() else: "User"
-  let text = if msg.hasKey("text"): msg["text"].getStr().strip() else: ""
+  let chatId = msg{"chat", "id"}.getBiggestInt()
+  let tgUserId = msg{"from", "id"}.getBiggestInt()
+  let username = if msg{"from"}.hasKey("username"): msg{"from", "username"}.getStr() else: ""
+  let firstName = if msg{"from"}.hasKey("first_name"): msg{"from", "first_name"}.getStr() else: "User"
+  let text = if msg.hasKey("text"): msg{"text"}.getStr().strip() else: ""
 
   db.registerOrUpdateUser(tgUserId, username, firstName)
   let currentState = db.getUserState(tgUserId)
@@ -166,7 +163,6 @@ proc handleMessage*(tg: TelegramClient, db: DbConn, msg: JsonNode) =
     tg.sendMessage(chatId, viewText, keyboard)
     return
 
-  # Ожидание URL сервиса
   if currentState == "WAITING_FOR_URL":
     if not isValidRenderUrl(text):
       let errText = "❌ <b>Некорректный URL!</b>\n\n" &
@@ -175,7 +171,6 @@ proc handleMessage*(tg: TelegramClient, db: DbConn, msg: JsonNode) =
       tg.sendMessage(chatId, errText, buildBackToMenuKeyboard())
       return
 
-    # Проводим первичную проверку доступности
     tg.sendMessage(chatId, "🔍 <i>Проверяем доступность URL...</i>")
     let pingRes = performPing(text)
     
@@ -194,17 +189,15 @@ proc handleMessage*(tg: TelegramClient, db: DbConn, msg: JsonNode) =
     tg.sendMessage(chatId, successText, buildBackToMenuKeyboard())
     return
 
-  # Дефолтный ответ
   let (viewText, keyboard) = renderMainView(db, tgUserId)
   tg.sendMessage(chatId, viewText, keyboard)
 
-# Обработка Inline-кнопок
 proc handleCallbackQuery*(tg: TelegramClient, db: DbConn, callback: JsonNode) =
-  let callbackId = callback["id"].getStr()
-  let chatId = callback["message"]["chat"]["id"].getBiggestInt()
-  let messageId = callback["message"]["message_id"].getBiggestInt()
-  let tgUserId = callback["from"]["id"].getBiggestInt()
-  let data = callback["data"].getStr()
+  let callbackId = callback{"id"}.getStr()
+  let chatId = callback{"message", "chat", "id"}.getBiggestInt()
+  let messageId = callback{"message", "message_id"}.getBiggestInt()
+  let tgUserId = callback{"from", "id"}.getBiggestInt()
+  let data = callback{"data"}.getStr()
 
   tg.answerCallbackQuery(callbackId)
 
@@ -241,7 +234,7 @@ proc handleCallbackQuery*(tg: TelegramClient, db: DbConn, callback: JsonNode) =
                    "🕐 <b>Проверено:</b> только что"
     else:
       resultText = "🔍 <b>Результат проверки</b>\n\n" &
-                   "🔴 <b>Статус:</b> OFFLINE / Oшибка\n" &
+                   "🔴 <b>Статус:</b> OFFLINE / Ошибка\n" &
                    "⚠️ <b>Детали:</b> " & (if res.statusCode > 0: "HTTP " & $res.statusCode else: "Сервер недоступен") & "\n" &
                    "⚡ <b>Время отклика:</b> " & $res.responseTimeMs & " ms\n" &
                    "🕐 <b>Проверено:</b> только что"
