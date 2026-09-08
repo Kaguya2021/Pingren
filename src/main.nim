@@ -1,10 +1,4 @@
-import config, bot
-
-proc main() =
-  echo "[INFO] Initializing Render Ping Bot in Nim..."
-  let cfg = loadConfig()
-  var manager = newBotManager(cfg)
-  manager.start()
+import bot
 
 when isMainModule:
-  main()
+  startBot()
